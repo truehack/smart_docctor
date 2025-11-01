@@ -1,10 +1,10 @@
-import { ScreenView } from '@/components/screen-view';
+import { Screen } from '@/components/screen';
 import { Text } from 'react-native-paper';
 
 export default function Notifications() {
     return (
-        <ScreenView style={{ justifyContent: 'center', alignItems: 'center' }}>
+        <Screen style={{ justifyContent: 'center', alignItems: 'center' }}>
             <Text>Уведомления</Text>
-        </ScreenView>
+        </Screen>
     );
 }
