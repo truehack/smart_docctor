@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import * as SQLite from 'expo-sqlite';
 
-type MedicationForm = 'tablet' | 'drop' | 'spray' | 'other';
-type ScheduleType = 'daily' | 'weekly_days' | 'every_x_days';
+export type MedicationForm = 'tablet' | 'drop' | 'spray' | 'other';
+export type ScheduleType = 'daily' | 'weekly_days' | 'every_x_days';
 
 export interface Medication {
     id?: number;

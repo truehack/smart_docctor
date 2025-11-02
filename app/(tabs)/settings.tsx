@@ -3,8 +3,8 @@ import { Text } from 'react-native-paper';
 
 export default function Settings() {
     return (
-        <Screen style={{ justifyContent: 'center', alignItems: 'center' }}>
-            <Text>Настройки</Text>
+        <Screen style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212' }}>
+            <Text style={{ color: 'white' }}>Настройки</Text>
         </Screen>
     );
 }
