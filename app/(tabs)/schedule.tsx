@@ -1,171 +1,267 @@
-import React, { useCallback } from 'react';
-import { View, FlatList } from 'react-native';
-import { Text, Card, useTheme, Button } from 'react-native-paper';
+import React, { useCallback, useState, useMemo } from 'react';
+import { View, FlatList, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { Text, Card, Button } from 'react-native-paper';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useMedications } from '@/database/useMedications';
 import { Screen } from '@/components/screen';
+import dayjs from 'dayjs';
 
 export default function Schedule() {
-    const { medications, loading, reload } = useMedications();
-    const navigation = useNavigation();
-    const theme = useTheme();
+  const { medications, reload, loading, markMedicationTaken, unmarkMedicationTaken } = useMedications();
 
-    // 🔁 автоматическое обновление при возвращении на экран
-    useFocusEffect(
-        useCallback(() => {
-            reload();
-        }, [reload])
-    );
+  const navigation = useNavigation();
 
-    if (loading) {
-        return (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                <Text>Загрузка...</Text>
-            </View>
-        );
+  const [selectedDate, setSelectedDate] = useState(dayjs().format('YYYY-MM-DD'));
+  const [takenMeds, setTakenMeds] = useState<Record<number, boolean>>({}); // id -> true/false
+
+  // при возврате на экран — обновляем
+  useFocusEffect(
+    useCallback(() => {
+    (async () => {
+      if (typeof reload === 'function') await reload();
+
+      const takenState: Record<number, boolean> = {};
+      for (const m of medications) {
+        try {
+          const list = m.taken_dates ? JSON.parse(m.taken_dates) : [];
+          if (list.includes(selectedDate)) takenState[m.id!] = true;
+        } catch {}
+      }
+      setTakenMeds(takenState);
+    })();
+  }, [reload, selectedDate])
+);
+
+  // неделя (3 дня до, 3 после)
+  const weekDays = useMemo(() => {
+    const today = dayjs();
+    return Array.from({ length: 7 }).map((_, i) => today.add(i - 3, 'day'));
+  }, []);
+
+  const parseTimes = (raw?: string) => {
+    if (!raw) return [];
+    try {
+      const p = JSON.parse(raw);
+      if (Array.isArray(p)) return p;
+    } catch {
+      const s = String(raw).replace(/[\[\]"]/g, '');
+      return s.split(',').map(x => x.trim()).filter(Boolean);
     }
+    return [];
+  };
 
-    const days = ['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС'];
-    const today = new Date().getDay(); // 0 = воскресенье
+  const medsForDate = useMemo(() => {
+    return (medications || []).filter((m) => {
+      if (!m || !m.start_date) return false;
+      const start = dayjs(m.start_date, 'YYYY-MM-DD');
+      const end = m.end_date ? dayjs(m.end_date, 'YYYY-MM-DD') : null;
+      const current = dayjs(selectedDate, 'YYYY-MM-DD');
 
-    return (
-        <Screen style={{ flex: 1, backgroundColor: '#121212', paddingHorizontal: 16, paddingTop: 20 }}>
-            {/* 📅 Панель дней недели */}
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }}>
-                {days.map((day, i) => {
-                    const isToday = (i + 1) % 7 === today;
-                    return (
-                        <View
-                            key={day}
-                            style={{
-                                backgroundColor: isToday ? '#4A3AFF' : '#1E1E1E',
-                                borderRadius: 25,
-                                width: 36,
-                                height: 36,
-                                justifyContent: 'center',
-                                alignItems: 'center',
-                            }}
-                        >
-                            <Text
-                                style={{
-                                    color: isToday ? 'white' : '#aaa',
-                                    fontWeight: '600',
-                                }}
-                            >
-                                {day}
-                            </Text>
-                        </View>
-                    );
-                })}
-            </View>
+      if (end) {
+        return (
+          (current.isSame(start, 'day') || current.isAfter(start, 'day')) &&
+          (current.isSame(end, 'day') || current.isBefore(end, 'day'))
+        );
+      }
+      return current.isSame(start, 'day');
+    });
+  }, [medications, selectedDate]);
 
-            {/* Заголовок */}
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text
-                    variant="titleLarge"
-                    style={{
-                        color: 'white',
-                        marginBottom: 12,
-                        fontWeight: '700',
-                    }}
-                >
-                    Медикаменты
-                </Text>
-                <Button
-                    mode="contained"
-                    onPress={() => navigation.navigate('Add' as never)}
-                    style={{
-                        marginBottom: 8,
-                        backgroundColor: '#4A3AFF',
-                    }}
-                >
-                    Добавить
-                </Button>
-            </View>
+  // обработчик "принятия"
+  const handleTake = async (id: number) => {
+    await markMedicationTaken(id, selectedDate);
+    setTakenMeds(prev => ({ ...prev, [id]: true }));
+  };
 
-            {/* 💊 Список медикаментов */}
-            <FlatList
-                data={medications}
-                keyExtractor={(item) => String(item.id)}
-                renderItem={({ item }) => {
-                    const status = 'Не принято';
-                    const statusColor = '#FF3B30';
-                    const time = item.times_list || '—';
-                    const desc = `${item.dosage || ''} ${item.form || ''}`.trim();
+  // обработчик "не принятия"
+  const handleSkip = async (id: number) => {
+    await unmarkMedicationTaken(id, selectedDate);
+    setTakenMeds(prev => ({ ...prev, [id]: false }));
+  };
 
-                    return (
-                        <View style={{ marginBottom: 16 }}>
-                            <Text
-                                style={{
-                                    color: '#aaa',
-                                    marginBottom: 4,
-                                    fontSize: 14,
-                                    fontWeight: '600',
-                                }}
-                            >
-                                {time}{' '}
-                                <Text style={{ color: statusColor, fontWeight: '500' }}>{status}</Text>
-                            </Text>
-
-                            <Card
-                                mode="contained"
-                                style={{
-                                    backgroundColor: '#1E1E1E',
-                                    borderRadius: 12,
-                                    paddingVertical: 12,
-                                    paddingHorizontal: 16,
-                                }}
-                            >
-                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                    <View
-                                        style={{
-                                            width: 40,
-                                            height: 40,
-                                            borderRadius: 20,
-                                            backgroundColor: '#2C2C2C',
-                                            justifyContent: 'center',
-                                            alignItems: 'center',
-                                            marginRight: 12,
-                                        }}
-                                    >
-                                        <Text style={{ fontSize: 20 }}>
-                                            {item.form === 'tablet'
-                                            ? '💊'
-                                            : item.form === 'drop'
-                                            ? '💧'
-                                            : item.form === 'spray'
-                                            ? '🧴'
-                                            : '❓'}
-                                        </Text>
-                                    </View>
-
-
-                                    <View style={{ flex: 1 }}>
-                                        <Text
-                                            style={{
-                                                color: 'white',
-                                                fontSize: 16,
-                                                fontWeight: '600',
-                                                marginBottom: 2,
-                                            }}
-                                        >
-                                            {item.name}
-                                        </Text>
-                                        <Text style={{ color: '#ccc', fontSize: 13 }}>
-                                            {desc || '—'}
-                                        </Text>
-                                    </View>
-                                </View>
-                            </Card>
-                        </View>
-                    );
-                }}
-                ListEmptyComponent={
-                    <Text style={{ color: '#999', textAlign: 'center', marginTop: 40 }}>
-                        Пока нет медикаментов. Нажми «Добавить».
-                    </Text>
-                }
-            />
-        </Screen>
+  // окно выбора действия
+  const handlePressMed = (item: any) => {
+    const taken = takenMeds[item.id];
+    Alert.alert(
+      item.name,
+      'Отметить приём?',
+      [
+        {
+          text: taken ? 'Снять отметку' : 'Принять 💊',
+          onPress: () => handleTake(item.id),
+        },
+        {
+          text: 'Не принять ❌',
+          onPress: () => handleSkip(item.id),
+          style: 'cancel',
+        },
+        {
+          text: 'Закрыть',
+          style: 'destructive',
+        },
+      ],
+      { cancelable: true }
     );
+  };
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <Text>Загрузка...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <Screen style={{ flex: 1, backgroundColor: '#121212', padding: 16 }}>
+      {/* 📅 календарь */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ marginBottom: 10, marginTop: 5 }}
+        contentContainerStyle={{ paddingVertical: 4 }}
+      >
+        {weekDays.map((date) => {
+          const formatted = date.format('YYYY-MM-DD');
+          const isSelected = formatted === selectedDate;
+          return (
+            <TouchableOpacity
+              key={formatted}
+              onPress={() => setSelectedDate(formatted)}
+              style={{
+                backgroundColor: isSelected ? '#4A3AFF' : '#1E1E1E',
+                borderRadius: 25,
+                width: 52,
+                height: 52,
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginRight: 12,
+                shadowColor: '#000',
+                shadowOpacity: isSelected ? 0.4 : 0.15,
+                shadowRadius: 3,
+                elevation: isSelected ? 4 : 1,
+              }}
+            >
+              <Text
+                style={{
+                  color: isSelected ? 'white' : '#bbb',
+                  fontWeight: '600',
+                  fontSize: 16,
+                }}
+              >
+                {date.format('DD')}
+              </Text>
+              <Text style={{ color: isSelected ? 'white' : '#888', fontSize: 10 }}>
+                {date.format('dd').toUpperCase()}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      {/* 📌 Заголовок */}
+      <View
+        style={{
+          marginTop: -250,
+          marginBottom: 16,
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}
+      >
+        <Text
+          variant="titleLarge"
+          style={{
+            color: 'white',
+            fontWeight: '700',
+            fontSize: 20,
+          }}
+        >
+          Расписание {dayjs(selectedDate).format('DD MMM')}
+        </Text>
+      </View>
+
+      {/* 💊 список медикаментов */}
+      <FlatList
+        data={medsForDate}
+        keyExtractor={(item) => String(item?.id ?? Math.random())}
+        renderItem={({ item }) => {
+          const times = parseTimes(item.times_list).join(', ') || '—';
+          const desc = `${item.instructions || ''}`.trim();
+          const taken = takenMeds[item.id];
+
+          return (
+            <TouchableOpacity onPress={() => handlePressMed(item)}>
+              <Card
+                style={{
+                  backgroundColor: '#1E1E1E',
+                  borderRadius: 14,
+                  marginVertical: 8,
+                  padding: 16,
+                  borderWidth: taken ? 2 : 0,
+                  borderColor: taken ? '#4A3AFF' : 'transparent',
+                }}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 22,
+                      backgroundColor: '#2C2C2C',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      marginRight: 14,
+                    }}
+                  >
+                    <Text style={{ fontSize: 22 }}>
+                      {taken
+                        ? '✅'
+                        : item.form === 'tablet'
+                        ? '💊'
+                        : item.form === 'drop'
+                        ? '💧'
+                        : item.form === 'spray'
+                        ? '🌫️'
+                        : '❓'}
+                    </Text>
+                  </View>
+
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={{
+                        color: 'white',
+                        fontSize: 16,
+                        fontWeight: '600',
+                        textDecorationLine: taken ? 'line-through' : 'none',
+                      }}
+                    >
+                      {item.name}
+                    </Text>
+                    {desc ? (
+                      <Text style={{ color: '#aaa', fontSize: 13 }}>{desc}</Text>
+                    ) : null}
+                    <Text style={{ color: '#777', fontSize: 12, marginTop: 4 }}>⏰ {times}</Text>
+                  </View>
+                </View>
+              </Card>
+            </TouchableOpacity>
+          );
+        }}
+        ListEmptyComponent={
+          <Text style={{ color: '#888', textAlign: 'center', marginTop: 30 }}>
+            На эту дату нет медикаментов.
+          </Text>
+        }
+      />
+    </Screen>
+  );
 }
+
+
+
+
+
+
+
+
